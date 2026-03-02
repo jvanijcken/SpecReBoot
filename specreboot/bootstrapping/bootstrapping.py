@@ -120,7 +120,7 @@ def calculate_boostrapping(
         spectra_boot = []
         n_empty = 0
 
-        for internal_id, spec in zip(internal_ids, spectra_binned):
+        for idx, (internal_id, spec) in enumerate(zip(internal_ids, spectra_binned)):
             mz = spec.peaks.mz
             intens = spec.peaks.intensities
 
@@ -128,8 +128,15 @@ def calculate_boostrapping(
             mz_kept = mz[mask]
             int_kept = intens[mask]
 
-            if mz_kept.size == 0:
+            is_empty = (mz_kept.size == 0)
+            is_zero  = (int_kept.size == 0) or np.all(int_kept == 0)
+            is_bad   = (not np.isfinite(int_kept).all()) if int_kept.size else False
+
+            if is_empty or is_zero or is_bad:
                 n_empty += 1
+                dummy_mz = float(global_bins_arr.max() + 1000.0 + idx)
+                mz_kept  = np.array([dummy_mz], dtype="float32")
+                int_kept = np.array([1.0], dtype="float32")
 
             meta = {**spec.metadata, "internal_id": internal_id}
             spectra_boot.append(
@@ -140,16 +147,8 @@ def calculate_boostrapping(
                 )
             )
 
-        # dummy peak so matchms/similarity functions don't crash on empty spectra
         if n_empty > 0:
-            for i_s, s in enumerate(spectra_boot):
-                if len(s.peaks.intensities) == 0:
-                    spectra_boot[i_s] = Spectrum(
-                        mz=np.array([global_bins_arr[0]], dtype="float32"),
-                        intensities=np.array([0.0], dtype="float32"),
-                        metadata=s.metadata,
-                    )
-            print(f"[bootstrap {b+1}/{B}] empty spectra this replicate: {n_empty}", flush=True)
+            print(f"[bootstrap {b+1}/{B}] invalid/empty spectra this replicate: {n_empty}", flush=True)
 
         sim_matrix = np.zeros((N, N), dtype=float)
 
@@ -223,7 +222,7 @@ def calculate_boostrapping(
                 hist_missing_bins.append(missing_arr)
 
         if (b + 1) % 5 == 0:
-            print(f"[bootstrap {b+1}/{B}] done")
+            print(f"[bootstrap {b+1}/{B}] done",flush=True)
 
     # aggregate
     mean_sim = np.eye(N, dtype="float32")
