@@ -8,7 +8,7 @@ from matchms.similarity.FlashSimilarity import FlashSimilarity
 from specreboot.preprocessing.filtering import general_cleaning
 from specreboot.binning.binning import global_bins as make_global_bins, bin_spectra
 from specreboot.bootstrapping.bootstrapping import calculate_boostrapping
-from specreboot.networking.gnps_style import load_gnps_graph_and_id_map, add_rescued_edges_to_gnps_graph
+from specreboot.networking.gnps_style import load_gnps_graph_and_id_map, add_threshold_edges_to_gnps_graph, add_rescued_edges_to_gnps_graph
 
 p = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
 
@@ -142,27 +142,24 @@ def build_parser(p: argparse.ArgumentParser):
         help='GNPS node attribute(s) to match against df_mean_sim.index (e.g., "shared name")',
     )
 
-    # rescue thresholds (pass through)
-    # rescue thresholds (core + rescued edges)
     p.add_argument(
-        "--sim-core",
+        "--sim-threshold",
         type=float,
         default=0.7,
         help=(
-            "Core-edge similarity threshold. An edge is labeled 'core' if:\n"
-            "  mean_similarity >= sim_core  AND  bootstrap_support >= support_core.\n"
-            "Typical: 0.6–0.8 (depends on score/metric)."
+            "Similarity threshold for the threshold graph and for defining core edges "
+            "in the rescued graph."
         ),
     )
 
     p.add_argument(
-        "--support-core",
+        "--support-threshold",
         type=float,
         default=0.5,
         help=(
-            "Core-edge support threshold (bootstrap_support). Used together with --sim-core.\n"
-            "Core edges require: bootstrap_support >= support_core.\n"
-            "Typical: 0.3–0.8 (higher = stricter, fewer but more reliable edges)."
+            "Minimum edge support for the 'threshold' graph.\n"
+            "An edge is kept if similarity >= --sim-threshold and "
+            "support >= --support-threshold."
         ),
     )
 
@@ -171,25 +168,11 @@ def build_parser(p: argparse.ArgumentParser):
         type=float,
         default=1e-5,
         help=(
-            "Minimum similarity for a 'rescued' edge.\n"
-            "An edge is labeled 'rescued' if:\n"
-            "  sim_rescue_min <= mean_similarity < sim_core  AND  bootstrap_support >= support_rescue.\n"
-            "Set close to 0 to allow very low-similarity edges to be rescued if support is high; "
-            "increase (e.g., 0.1–0.3) to avoid rescuing extremely weak similarities."
+            "Minimum mean similarity required for a rescued edge (even if it connects into core). "
+                "This is a safety floor to prevent adding extremely weak similarities."
         ),
     )
 
-    p.add_argument(
-        "--support-rescue",
-        type=float,
-        default=0.5,
-        help=(
-            "Support threshold for 'rescued' edges (bootstrap_support).\n"
-            "Rescued edges require: bootstrap_support >= support_rescue AND similarity is below --sim-core "
-            "but above --sim-rescue-min.\n"
-            "Often set equal to or higher than --support-core to rescue only very stable edges."
-        ),
-    )
     p.add_argument(
         "--max-component-size",
         type=int,
@@ -256,8 +239,22 @@ def run(args):
             "Could not map bootstrap IDs to GNPS nodes. "
             "Try a different --candidate-node-attrs value (or multiple)."
         )
+    
+    out_graph_rescued = str(args.outdir / f"{args.prefix}_gnps_plus_rescued.graphml")
+    out_graph_thresh = str(args.outdir / f"{args.prefix}_gnps_threshold.graphml")
 
-    out_graph = args.output_graphml or str(args.outdir / f"{args.prefix}_gnps_plus_rescued.graphml")
+
+    add_threshold_edges_to_gnps_graph(
+        G_gnps=gnps_network,
+        df_mean_sim=df_mean_sim,
+        df_support=df_edge_sup,
+        id_map=id_map,
+        sim_threshold=args.sim_threshold,
+        support_threshold=args.support_threshold,
+        max_component_size=args.max_component_size,
+        output_file=out_graph_thresh,
+    )
+
 
     # If your helper supports thresholds, pass them. If not, remove these keyword args.
     add_rescued_edges_to_gnps_graph(
@@ -265,12 +262,12 @@ def run(args):
         df_mean_sim,
         df_edge_sup,
         id_map,
-        sim_core=args.sim_core,
-        support_core=args.support_core,
+        sim_core=args.sim_threshold,
+        support_core=args.support_threshold,
         sim_rescue_min=args.sim_rescue_min,
-        support_rescue=args.support_rescue,
+        support_rescue=args.support_threshold,
         max_component_size=args.max_component_size,
-        output_file=out_graph,
+        output_file=out_graph_rescued,
     )
 
 
