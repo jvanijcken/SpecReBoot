@@ -2,6 +2,15 @@ import networkx as nx
 import pandas as pd
 from specreboot.networking.networking import _filter_components
 
+def _make_node_only_copy(G_gnps: nx.Graph) -> nx.Graph:
+    """
+    Create a new graph with the same nodes and node attributes as G_gnps,
+    but with NO edges.
+    """
+    G_new = nx.Graph()
+    for n, attrs in G_gnps.nodes(data=True):
+        G_new.add_node(n, **dict(attrs))
+    return G_new
 
 def load_gnps_graph_and_id_map(
     graphml_path: str,
@@ -41,6 +50,104 @@ def load_gnps_graph_and_id_map(
     return G, {}
 
 
+def add_threshold_edges_to_gnps_graph(
+    G_gnps: nx.Graph,
+    df_mean_sim: pd.DataFrame,
+    df_support: pd.DataFrame,
+    id_map: dict[str, str],
+    sim_threshold: float = 0.7,
+    support_threshold: float = 0.3,
+    max_component_size: int | None = None,
+    cosine_delta: float = 0.02,
+    output_file: str = "gnps_plus_threshold.graphml",
+) -> nx.Graph:
+    """
+    Overlay threshold-filtered bootstrap edges onto an existing GNPS GraphML network.
+
+    Logic
+    -----
+    For any pair (u, v) present in the bootstrap matrices:
+      - keep/add edge only if:
+            sim >= sim_threshold
+        AND support >= support_threshold
+
+    Behavior
+    --------
+    - If edge already exists in GNPS:
+        preserve all GNPS attributes and add/update bootstrap evidence
+    - If edge does not exist in GNPS:
+        create a new edge labeled as bootstrap-supported
+
+    Attributes written
+    ------------------
+    For qualifying edges:
+      - bootstrap_sim: float
+      - bootstrap_support: float
+      - bootstrap_class: "threshold"
+
+    For newly added edges:
+      - edge_class: "threshold"
+      - origin: "bootstrap"
+      - weight: sim
+    """
+    # Basic validation
+    if not isinstance(df_mean_sim, pd.DataFrame) or not isinstance(df_support, pd.DataFrame):
+        raise TypeError("df_mean_sim and df_support must be pandas DataFrames.")
+
+    if df_mean_sim.shape != df_support.shape:
+        raise ValueError("Mean similarity and support matrices must have same shape.")
+
+    if df_mean_sim.index.tolist() != df_support.index.tolist():
+        raise ValueError("DataFrame indices must match.")
+
+    if df_mean_sim.columns.tolist() != df_support.columns.tolist():
+        raise ValueError("DataFrame columns must match.")
+
+    G = _make_node_only_copy(G_gnps)
+    nodes_in_graph = set(G.nodes())
+
+    ids = list(df_mean_sim.index)
+
+    for i in range(len(ids)):
+        a = ids[i]
+        a_str = str(a)
+        if a_str not in id_map:
+            continue
+        u = id_map[a_str]
+
+        for j in range(i + 1, len(ids)):
+            b = ids[j]
+            b_str = str(b)
+            if b_str not in id_map:
+                continue
+            v = id_map[b_str]
+
+            sim = float(df_mean_sim.loc[a, b])
+            sup = float(df_support.loc[a, b])
+
+            if not (sim >= sim_threshold and sup >= support_threshold):
+                continue
+
+            if G.has_edge(u, v):
+                G[u][v]["bootstrap_sim"] = sim
+                G[u][v]["bootstrap_support"] = sup
+                G[u][v]["bootstrap_class"] = "threshold"
+            else:
+                G.add_edge(
+                    u, v,
+                    bootstrap_sim=sim,
+                    bootstrap_support=sup,
+                    bootstrap_class="threshold",
+                    edge_class="threshold",
+                    origin="bootstrap",
+                    weight=sim,
+                )
+
+    if max_component_size is not None:
+        _filter_components(G, max_component_size, cosine_delta)
+
+    nx.write_graphml(G, output_file)
+    return G
 
 def add_rescued_edges_to_gnps_graph(
     G_gnps: nx.Graph,
@@ -108,7 +215,7 @@ def add_rescued_edges_to_gnps_graph(
     nx.Graph
         Updated graph (GNPS + bootstrap overlay).
     """
-    G = G_gnps.copy()
+    G = _make_node_only_copy(G_gnps)
     nodes_in_graph = set(G.nodes())
 
     ids = list(df_mean_sim.index)
