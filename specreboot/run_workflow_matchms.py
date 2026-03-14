@@ -13,6 +13,7 @@ from specreboot.networking.networking import build_base_graph, build_thresh_grap
 
 
 def build_parser(p: argparse.ArgumentParser):
+    """Add command-line arguments for the matchms workflow."""
     p.add_argument(
             "--mgf",
             required=True,
@@ -229,6 +230,7 @@ def _resolve_and_validate_similarities(args) -> list[str]:
 
 
 def calculate_similarities(binned_spectra, bins, model_name: str, similarity, args, outdir: Path):
+    """Run bootstrapping for one similarity metric and export the output matrices."""
     result = calculate_boostrapping(
         binned_spectra,
         bins,
@@ -239,7 +241,7 @@ def calculate_similarities(binned_spectra, bins, model_name: str, similarity, ar
         n_jobs=args.n_jobs,
         return_history=args.return_history,
         track_bins=args.track_bins,
-        return_label_map=True,
+        return_label_map=True, # label_map will be stored inside the returned history object
         label_mode=args.label_mode,
     )
 
@@ -256,6 +258,7 @@ def calculate_similarities(binned_spectra, bins, model_name: str, similarity, ar
 
 
 def networking_score(df_mean_sim, df_edge_sup, similarity_score: str, sim_threshold: float, args, outdir: Path):
+    """Build base, threshold, and core-rescue graphs for one similarity metric."""
     build_base_graph(
         df_mean_sim, df_edge_sup,
         sim_threshold=sim_threshold,
@@ -274,22 +277,25 @@ def networking_score(df_mean_sim, df_edge_sup, similarity_score: str, sim_thresh
     build_core_rescue_graph(
         df_mean_sim, df_edge_sup,
         sim_core=sim_threshold,
-        support_core=args.support_core,
+        support_core=args.support_threshold,
         sim_rescue_min=args.sim_rescue_min,
-        support_rescue=args.support_rescue,
+        support_rescue=args.support_threshold,
         max_component_size=args.max_component_size,
         output_file=str(outdir / f"{args.prefix}_bootstrap_rescued_{similarity_score}.graphml"),
     )
 
 
 def run(args):
+    """Run the full matchms workflow from spectra loading to graph export."""
     args.outdir.mkdir(parents=True, exist_ok=True)
 
+    # --- Load and clean spectra ---
     spectra = load_from_mgf(str(args.mgf))
     cleaned_name = args.cleaned_mgf or str(args.outdir / f"{args.mgf.stem}_cleaned.mgf")
     spectra_cleaned, report = general_cleaning(spectra, file_name=cleaned_name)
     print(report)
 
+    # --- Bin spectra for bootstrapping ---
     bins = make_global_bins(spectra_cleaned, args.decimals)
     binned_spectra = bin_spectra(spectra_cleaned, args.decimals)
 
@@ -298,6 +304,7 @@ def run(args):
     sim_keys = _resolve_and_validate_similarities(args)
 
 
+    # --- Create the requested similarity objects ---
     if "cosine" in sim_keys:
         similarity_objs["Cosine"] = FlashSimilarity(
             score_type="cosine", matching_mode="fragment", tolerance=args.tolerance
@@ -327,7 +334,7 @@ def run(args):
         similarity_objs["MS2DeepScore"] = MS2DeepScore(ms2dp_model)
 
 
-    #Run selected metrics
+    # --- Run bootstrapping and graph construction for each selected metric ---
     for model_name, similarity in similarity_objs.items():
         result = calculate_similarities(
             binned_spectra,
