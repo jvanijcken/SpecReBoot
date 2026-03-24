@@ -245,16 +245,11 @@ def calculate_similarities(binned_spectra, bins, model_name: str, similarity, ar
         label_mode=args.label_mode,
     )
 
-    if args.return_history or args.track_bins:
-        df_mean_sim, df_edge_sup, history = result
-        df_mean_sim.to_csv(outdir / f"{args.prefix}_bootstrap_mean_similarity_{model_name}.csv")
-        df_edge_sup.to_csv(outdir / f"{args.prefix}_bootstrap_edge_support_{model_name}.csv")
-        return df_mean_sim, df_edge_sup, history
-
-    df_mean_sim, df_edge_sup = result
+    df_mean_sim, df_edge_sup, history = result
     df_mean_sim.to_csv(outdir / f"{args.prefix}_bootstrap_mean_similarity_{model_name}.csv")
     df_edge_sup.to_csv(outdir / f"{args.prefix}_bootstrap_edge_support_{model_name}.csv")
-    return df_mean_sim, df_edge_sup
+    return df_mean_sim, df_edge_sup, history
+
 
 
 def networking_score(df_mean_sim, df_edge_sup, similarity_score: str, sim_threshold: float, args, outdir: Path):
@@ -345,13 +340,12 @@ def run(args):
             args.outdir,
         )
 
-        if args.return_history or args.track_bins:
-            df_mean_sim, df_edge_sup, history = result
+        df_mean_sim, df_edge_sup, history = result
+
+        if history:
             with open(args.outdir / f"{args.prefix}_bootstrap_history_{model_name}.pkl", "wb") as f:
                 pickle.dump(history, f)
-        else:
-            df_mean_sim, df_edge_sup = result
-
+                
         sim_thr = args.sim_threshold_ms2dp if model_name == "MS2DeepScore" else args.sim_threshold
 
         networking_score(

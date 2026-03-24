@@ -35,9 +35,6 @@ def calculate_bootstrapping(
 
     total_start = time.perf_counter()
 
-    if verbose:
-        print(f"Running {B} bootstraps in {len(batches)} batches (batch_size={batch_size}) with {n_jobs} workers", flush=True)
-
     # NOTE: due to floating point arithmatic, the resulting values in the cosine similarity matrix might differ with the orignal function with around <1e-7. 
     history = {}
     
@@ -54,9 +51,13 @@ def calculate_bootstrapping(
     bootstrap_ids = list(range(B))
     batches = [bootstrap_ids[i:i + batch_size] for i in range(0, B, batch_size)]
 
+    if verbose:
+        print(f"Running {B} bootstraps in {len(batches)} batches (batch_size={batch_size}) with {n_jobs} workers", flush=True)
+
     compute_start = time.perf_counter()
 
-    args = [(spectra_binned, global_bins, similarity_metric, k, b, seed) for b in batches]
+    args = [(spectra_binned, global_bins, similarity_metric, seed, k, b, return_history, track_bins, verbose) for b in batches]
+
     with ThreadPoolExecutor(max_workers=n_jobs) as executor:
         results = list(executor.map(lambda x: bootstrap_batch(*x), args))
 
