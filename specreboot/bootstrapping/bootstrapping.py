@@ -22,28 +22,60 @@ def calculate_bootstrapping(
     return_label_map=True,
     verbose: bool = True,
 ):
-    """
-    Bootstrapped mean similarity + mutual-kNN edge support.
+    """Calculate bootstrapped mean similarity and mutual-kNN edge support for a single replicate.
+
+    Parameters
+    -------
+    spectra_binned (list[Spectrum]): List of binned spectra.
+    global_bins (array-like): Global m/z bins used as the bootstrap sampling space.
+    B : int
+        Number of bootstrap replicates.
+    k : int
+        Number of nearest neighbors used for mutual-kNN edge support.
+    similarity_metric : callable
+        Similarity object used to calculate pairwise similarities.
+    n_jobs : int
+        Number of workers used for parallel batch execution.
+    batch_size : int
+        Number of bootstrap replicates processed per batch.
+    seed : int
+        Base random seed for bootstrap resampling.
+    return_history : bool
+        Whether to return cumulative bootstrap history.
+    track_bins : bool
+        Whether to store sampled and missing bins for each bootstrap.
+    label_mode : str
+        Output label type. Options are "feature", "scan", or "internal".
+    return_label_map : bool
+        Whether to return the mapping between output labels and
+        original spectrum identifiers.
+    verbose : bool
+        Whether to print progress and timing information.
 
     Returns
     -------
-    If return_history is False:
-        df_mean_sim, df_edge_sup                 (and label_map if return_label_map True)
-    If return_history is True:
-        df_mean_sim, df_edge_sup, history        (history may include label_map)
+    tuple:
+    - If return_history is False and return_label_map is False:
+      (df_mean_sim, df_edge_sup)
+    - If return_history is False and return_label_map is True:
+      (df_mean_sim, df_edge_sup, label_map)
+    - If return_history is True:
+      (df_mean_sim, df_edge_sup, history)
     """
-
     total_start = time.perf_counter()
 
     # NOTE: due to floating point arithmatic, the resulting values in the cosine similarity matrix might differ with the orignal function with around <1e-7. 
     history = {}
-    
-    global_bins = np.array(global_bins)  # Important, a simple list will raise an error
 
+    # The similarity implementation expects a NumPy array of global bins.
+    global_bins = np.array(global_bins)
+
+    # Build output labels and label map for the selected label mode.
     out_labels, label_info = _get_spectra_labels(label_mode, spectra_binned)
 
     dataset_size = len(spectra_binned)
 
+    # Accumulate results across all bootstrap replicates.
     total_pair_similarities = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the sum of all similarities of each pair combination
     total_pair_counts       = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the nr of times a given pair is used in the bootstrapping
     total_edge_support      = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the nr of times a given pair are each others closest k neighbours
@@ -73,7 +105,7 @@ def calculate_bootstrapping(
     for result in results:
         pair_similarities, pair_counts, edge_support, batch_history = result
 
-        # Add the results if this iteration
+        # Add the batch results to the global totals.
         total_pair_similarities += pair_similarities
         total_pair_counts       += pair_counts
         total_edge_support      += edge_support
@@ -88,14 +120,15 @@ def calculate_bootstrapping(
 
 
      
-    # Get the average of similarities
+    # Calculate the mean similarity only where a pair was observed.
     mean_similarities = np.divide(
         total_pair_similarities,
         total_pair_counts,
         out=np.zeros_like(total_pair_similarities, dtype=float),
         where=total_pair_counts != 0
     )
-    np.fill_diagonal(mean_similarities , 1)  # needed to exactly match original implementation; all spectra have a similarity of 1 to themselves
+    # Self-similarity is fixed to 1 to match the original implementation.
+    np.fill_diagonal(mean_similarities , 1)
     mean_edge_support = total_edge_support / B
 
     # Needed to match correct return type
@@ -148,11 +181,40 @@ def bootstrap_batch(
     track_bins=False,
     verbose=False,
 ):
+    """Run a batch of bootstrap replicates.
+
+    Parameters
+    -------
+    spectra_binned : list[Spectrum]
+        List of binned spectra.
+    global_bins : np.ndarray
+        Global m/z bins used for resampling.
+    similarity_metric: callable
+        Similarity object used to calculate pairwise similarities.
+    seed : int
+        Base random seed.
+    k : int
+        Number of nearest neighbors used for mutual-kNN support.
+    B : list[int]
+        Bootstrap replicate indices processed in this batch.
+    collect_history : bool
+        Whether to store per-bootstrap results.
+    track_bins : bool
+        Whether to store sampled and missing bins for each bootstrap.
+    verbose : bool
+        Whether to print timing information.    
+
+    Returns
+    -------
+    tuple:
+    (total_pair_similarities, total_pair_counts, total_edge_support, history)
+    """
     t_batch_start = time.perf_counter()
 
     dataset_size = len(spectra_binned)
     random_generator = np.random.default_rng(seed)
 
+    # Accumulate results across the bootstrap replicates in this batch.
     total_pair_similarities = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the sum of all similarities of each pair combination
     total_pair_counts       = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the nr of times a given pair is used in the bootstrapping
     total_edge_support      = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the nr of times a given pair are each others closest k neighbours
@@ -207,6 +269,18 @@ def bootstrap_batch(
      
 
 def _reconstruct_history(dataset_size, all_history):
+    """Reconstruct cumulative similarity and edge-support history.
+
+    Parameters:
+    dataset_size : int
+        Number of spectra in the dataset.
+    all_history :list[dict]
+        Per-bootstrap history entries.
+
+    Returns:
+    tuple[list[np.ndarray], list[np.ndarray]]:
+    Cumulative mean similarity matrices and cumulative edge-support matrices.
+    """
     history_mean_sim = []
     history_edge_sup = []
 
@@ -235,6 +309,18 @@ def _reconstruct_history(dataset_size, all_history):
 
 
 def _get_spectra_labels(label_mode: str, spectra_binned: list[Spectrum]) -> tuple[list[str], dict[str, any]]:  # Logic from previous main function refactored into a helper function
+    """Create output labels and label map for the selected label mode.
+
+    Parameters:
+    label_mode : str
+        Label mode. Options are "feature", "scan", or "internal".
+    spectra_binned : list[Spectrum]
+        List of binned spectra.
+
+    Returns:
+    tuple[list[str], dict[str, any]]:
+        Output labels and a dictionary containing label_map and label_mode.
+    """
     scan_labels = []
     feature_labels = []
     internal_ids = []
@@ -284,6 +370,7 @@ def _get_spectra_labels(label_mode: str, spectra_binned: list[Spectrum]) -> tupl
 
 
 def __make_unique(labels: list[any]) -> list[str]:
+    """Make labels unique by appending a suffix to duplicated values."""
     counts = Counter(labels)
     seen = Counter()
     out = []
@@ -298,8 +385,15 @@ def __make_unique(labels: list[any]) -> list[str]:
 
 
 def mutual_topk(A: np.ndarray, k: int) -> np.ndarray:
-    """ gives a matrix in the shap of A, where a 1 means a pair are each others top-k neighbor """
+    """Return a binary matrix marking mutual top-k neighbours.
 
+    Parameters:
+    A (np.ndarray): Pairwise similarity matrix.
+    k (int): Number of nearest neighbours to retain per row.
+
+    Returns:
+    np.ndarray: Binary matrix where 1 indicates a mutual top-k relationship.
+    """
     n = A.shape[0]
     A_work = A.copy()
     np.fill_diagonal(A_work, -np.inf)  # This makes sure self-similarity is not counted as a top neighbor
@@ -320,6 +414,20 @@ def mutual_topk(A: np.ndarray, k: int) -> np.ndarray:
 
 
 def _mask_spectra(random_generator: Any, global_bins: np.ndarray, binned_spectra: list[Spectrum]) -> tuple[list[Spectrum], np.ndarray]:
+    """Mask spectra according to one bootstrap sample of the global bins.
+
+    Parameters:
+    random_generator : Any
+        NumPy random generator used for resampling.
+    global_bins : np.ndarray
+        Global m/z bins used for bootstrap sampling.
+    binned_spectra : list[Spectrum]
+        List of binned spectra.
+
+    Returns:
+    tuple[list[Spectrum], np.ndarray]:
+    Masked spectra and the sampled bins used in this bootstrap replicate.
+    """
     result = []
 
     sampled_indices = random_generator.integers(0, len(global_bins), size=len(global_bins))
