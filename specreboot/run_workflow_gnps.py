@@ -229,7 +229,7 @@ def run(args):
     similarity = _make_similarity(args)
 
     # --- Run bootstrapping ----
-    result = calculate_bootstrapping(
+    df_mean_sim, df_edge_sup, metadata = calculate_bootstrapping(
         binned_spectra,
         bins,
         B=args.B,
@@ -242,8 +242,7 @@ def run(args):
         return_label_map=True,
         label_mode=args.label_mode,
     )
-
-    df_mean_sim, df_edge_sup, label_map = result
+    label_map = metadata["label_map"]
 
     # --- Export similarity, support, and label-map outputs ---
     df_mean_sim.to_csv(args.outdir / f"{args.prefix}_bootstrap_mean_similarity.csv", index=False)
