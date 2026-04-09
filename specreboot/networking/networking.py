@@ -31,7 +31,6 @@ def _filter_components(edge_mask: np.array, u_nodes: np.array, v_nodes: np.array
     """"
     creates a mask that removes edges that would cause clusters to grow too big
     """
-    print(f"{max_component_size = }")
 
     retired_groups = set()
     
