@@ -124,6 +124,7 @@ def build_base_graph(
         for i, j, s, p in zip(i_idx[mask], j_idx[mask], sim_vals[mask], sup_vals[mask])
     ]
     G.add_edges_from(edges)
+    _assign_cluster_ids(G)
 
     nx.write_graphml(G, output_file)
     return G
@@ -169,6 +170,7 @@ def build_thresh_graph(
         for i, j, s, p in zip(i_idx[mask], j_idx[mask], sim_vals[mask], sup_vals[mask])
     ]
     G.add_edges_from(edges)
+    _assign_cluster_ids(G)
 
     nx.write_graphml(G, output_file)
     return G
@@ -220,6 +222,16 @@ def build_core_rescue_graph(
         for i, j, s, p, lab in zip(i_idx[either_mask], j_idx[either_mask], sim_vals[either_mask], sup_vals[either_mask], labels)
     ]
     G.add_edges_from(edges)
+    _assign_cluster_ids(G)
 
     nx.write_graphml(G, output_file)
     return G
+
+
+def _assign_cluster_ids(graph):
+    all_nodes = list(nx.connected_components(graph))
+    sorted_nodes = sorted(all_nodes, key=len, reverse=True)  # largest cluster has id 0
+
+    for cid, comp in enumerate(sorted_nodes):
+        for node in comp:
+            graph.nodes[node]["component"] = cid
