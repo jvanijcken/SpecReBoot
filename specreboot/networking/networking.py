@@ -36,7 +36,7 @@ def _filter_components(edge_mask: np.array, u_nodes: np.array, v_nodes: np.array
     
     nr_of_nodes = max(np.max(u_nodes), np.max(v_nodes)) + 1
     node_groups = np.array(range(nr_of_nodes))  # lookup
-    group_sizes       = np.ones(nr_of_nodes) 
+    group_sizes = np.ones(nr_of_nodes) 
 
     similarity_array = similarity_array.copy()  # make a copy to modify
     similarity_array[edge_mask == 0] = 0  # remove all values that have no edges
@@ -56,6 +56,8 @@ def _filter_components(edge_mask: np.array, u_nodes: np.array, v_nodes: np.array
         v_group = node_groups[v]  # look up the group of v
 
         if retire_groups and any(g in retired_groups for g in [u_group, v_group]):  # if we turned on this setting, we don't touch the retired groups (matches behaviour of original breakup implementation)
+            retired_groups.add(u_group)
+            retired_groups.add(v_group)  # we need to make sure BOTH groups are retired after a failed connection
             continue
 
         if u_group == v_group:  # if they're already in the same cluster, the cluster won't grow in size
