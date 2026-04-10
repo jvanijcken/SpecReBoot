@@ -64,7 +64,6 @@ def calculate_bootstrapping(
     """
     total_start = time.perf_counter()
 
-    # NOTE: due to floating point arithmatic, the resulting values in the cosine similarity matrix might differ with the orignal function with around <1e-7. 
     history = {}
 
     # The similarity implementation expects a NumPy array of global bins.
@@ -77,7 +76,6 @@ def calculate_bootstrapping(
 
     # Accumulate results across all bootstrap replicates.
     total_pair_similarities = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the sum of all similarities of each pair combination
-    total_pair_counts       = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the nr of times a given pair is used in the bootstrapping
     total_edge_support      = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the nr of times a given pair are each others closest k neighbours
 
     bootstrap_ids = list(range(B))
@@ -103,11 +101,10 @@ def calculate_bootstrapping(
     merge_start = time.perf_counter()
 
     for result in results:
-        pair_similarities, pair_counts, edge_support, batch_history = result
+        pair_similarities, edge_support, batch_history = result
 
         # Add the batch results to the global totals.
         total_pair_similarities += pair_similarities
-        total_pair_counts       += pair_counts
         total_edge_support      += edge_support
         all_history             += batch_history
 
@@ -118,17 +115,9 @@ def calculate_bootstrapping(
         print(f"Merge finished in {merge_end - merge_start:.2f} seconds", flush=True)
         print(f"Total bootstrapping completed in {total_end - total_start:.2f} seconds", flush=True)
 
+    mean_similarities = total_pair_similarities / B
+    np.fill_diagonal(mean_similarities , 1)   # Self-similarity is fixed to 1 to match the original implementation.
 
-     
-    # Calculate the mean similarity only where a pair was observed.
-    mean_similarities = np.divide(
-        total_pair_similarities,
-        total_pair_counts,
-        out=np.zeros_like(total_pair_similarities, dtype=float),
-        where=total_pair_counts != 0
-    )
-    # Self-similarity is fixed to 1 to match the original implementation.
-    np.fill_diagonal(mean_similarities , 1)
     mean_edge_support = total_edge_support / B
 
     # Needed to match correct return type
@@ -214,7 +203,6 @@ def bootstrap_batch(
 
     # Accumulate results across the bootstrap replicates in this batch.
     total_pair_similarities = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the sum of all similarities of each pair combination
-    total_pair_counts       = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the nr of times a given pair is used in the bootstrapping
     total_edge_support      = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the nr of times a given pair are each others closest k neighbours
 
     history = []
@@ -229,12 +217,10 @@ def bootstrap_batch(
         top_k_nearest_neighbours = mutual_topk(pair_similarity_matrix, k)
 
         # Get the position of the pairs that we used in this iteration
-        pair_counts  = (pair_similarity_matrix != 0).astype(int)
         edge_support = (top_k_nearest_neighbours != 0).astype(int)
 
         # Add the results if this iteration
         total_pair_similarities += pair_similarity_matrix
-        total_pair_counts       += pair_counts
         total_edge_support      += edge_support
 
         run = {}
@@ -243,7 +229,6 @@ def bootstrap_batch(
 
         if collect_history:
             run["pair_sim_sum"] = pair_similarity_matrix
-            run["pair_counts"]  = pair_counts
             run["edge_support"] = edge_support
 
 
@@ -259,8 +244,7 @@ def bootstrap_batch(
         print(f"Batch {B[0]}-{B[-1]} finished in {t_batch_end - t_batch_start:.2f} s", flush=True)
 
     return (
-        total_pair_similarities, 
-        total_pair_counts,        
+        total_pair_similarities,  
         total_edge_support,    
         history
     )
@@ -283,20 +267,13 @@ def _reconstruct_history(dataset_size, all_history):
     history_edge_sup = []
 
     current_pair_similarities = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the sum of all similarities of each pair combination
-    current_pair_counts       = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the nr of times a given pair is used in the bootstrapping
     current_edge_support      = np.zeros((dataset_size, dataset_size), dtype=float)  # matrix with the nr of times a given pair are each others closest k neighbours
 
     for b, history in enumerate(sorted(all_history, key=lambda x: x["b"])):
         current_pair_similarities += history["pair_sim_sum"]
-        current_pair_counts       += history["pair_counts"] 
         current_edge_support      += history["edge_support"]
 
-        current_mean_similarities = np.divide(
-            current_pair_similarities,
-            current_pair_counts,
-            out=np.zeros_like(current_pair_similarities, dtype=float),
-            where=current_pair_counts != 0
-        )
+        current_mean_similarities = current_pair_similarities / (b + 1)
         current_mean_edge_support = current_edge_support / (b + 1)
 
         history_mean_sim.append(current_mean_similarities)
