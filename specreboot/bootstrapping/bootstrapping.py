@@ -154,19 +154,17 @@ def calculate_bootstrapping(
 
     print(f"Total bootstrapping completed in {total_end - total_start:.2f} seconds", flush=True)
 
-    if track_bins:
-        history["sampled_bins"] = [h["sampled_bins"] for h in sorted(all_history, key=lambda x: x["b"])]
-        history["missing_bins"] = [h["missing_bins"] for h in sorted(all_history, key=lambda x: x["b"])]
-
+    metadata = {}
     if return_history:
-        if return_label_map:
-            history |= label_info
-        history = {k: v for k, v in history.items() if len(v) != 0}
-        return df_mean_sim, df_edge_sup, history
-
+        metadata["history"] = history
+    if track_bins:
+        metadata["sampled_bins"] = [h["sampled_bins"] for h in sorted(all_history, key=lambda x: x["b"])]
+        metadata["missing_bins"] = [h["missing_bins"] for h in sorted(all_history, key=lambda x: x["b"])]
     if return_label_map:
-        return df_mean_sim, df_edge_sup, label_info["label_map"]
-    return df_mean_sim, df_edge_sup
+        metadata |= label_info
+        
+    return df_mean_sim, df_edge_sup, metadata
+
 
 
 
@@ -241,9 +239,9 @@ def bootstrap_batch(
 
         run = {}
         history.append(run)
+        run["b"] = b
+
         if collect_history:
-            
-            run["b"] = b
             run["pair_sim_sum"] = pair_similarity_matrix
             run["pair_counts"]  = pair_counts
             run["edge_support"] = edge_support

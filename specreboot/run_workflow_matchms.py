@@ -231,7 +231,7 @@ def _resolve_and_validate_similarities(args) -> list[str]:
 
 def calculate_similarities(binned_spectra, bins, model_name: str, similarity, args, outdir: Path):
     """Run bootstrapping for one similarity metric and export the output matrices."""
-    result = calculate_bootstrapping(
+    df_mean_sim, df_edge_sup, history = calculate_bootstrapping(
         binned_spectra,
         bins,
         B=args.B,
@@ -245,7 +245,6 @@ def calculate_similarities(binned_spectra, bins, model_name: str, similarity, ar
         label_mode=args.label_mode,
     )
 
-    df_mean_sim, df_edge_sup, history = result
     df_mean_sim.to_csv(outdir / f"{args.prefix}_bootstrap_mean_similarity_{model_name}.csv")
     df_edge_sup.to_csv(outdir / f"{args.prefix}_bootstrap_edge_support_{model_name}.csv")
     return df_mean_sim, df_edge_sup, history
@@ -331,7 +330,7 @@ def run(args):
 
     # --- Run bootstrapping and graph construction for each selected metric ---
     for model_name, similarity in similarity_objs.items():
-        result = calculate_similarities(
+        df_mean_sim, df_edge_sup, metadata = calculate_similarities(
             binned_spectra,
             bins,
             model_name,
@@ -340,7 +339,7 @@ def run(args):
             args.outdir,
         )
 
-        df_mean_sim, df_edge_sup, history = result
+        history = metadata.get("history")
 
         if history:
             with open(args.outdir / f"{args.prefix}_bootstrap_history_{model_name}.pkl", "wb") as f:
